@@ -1,12 +1,9 @@
 pipeline {
     agent any
 
+    // Suppress interactive prompts since it is running via background automation
     environment {
-        // Unpacks the single AWS Credentials block you saved under 'aws-credentials-id'
-        AWS_CREDENTIALS       = credentials('aws-credentials-id')
-        AWS_ACCESS_KEY_ID     = env.AWS_ACCESS_KEY_ID
-        AWS_SECRET_ACCESS_KEY = env.AWS_SECRET_ACCESS_KEY
-        TF_IN_AUTOMATION      = 'true'
+        TF_IN_AUTOMATION = 'true'
     }
 
     stages {
@@ -16,37 +13,39 @@ pipeline {
             }
         }
 
-        stage('Terraform Init') {
+        stage('Terraform Work') {
             steps {
-                sh 'terraform init'
-            }
-        }
-
-        stage('Terraform Plan') {
-            steps {
-                sh 'terraform plan -out=tfplan'
-            }
-        }
-
-        stage('Approval Gate') {
-            steps {
-                input message: "Do you want to deploy this infrastructure to AWS?", ok: "Deploy Now"
-            }
-        }
-
-        stage('Terraform Apply') {
-            steps {
-                sh 'terraform apply -auto-approve tfplan'
+                // Securely extracts your saved AWS credentials directly into terminal memory
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding', 
+                    credentialsId: 'aws-credentials-id', 
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID', 
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    
+                    echo "=== Running Terraform Pipeline ==="
+                    
+                    echo "Initializing Working Directory..."
+                    sh 'terraform init'
+                    
+                    echo "Creating Infrastructure Preview Plan..."
+                    sh 'terraform plan -out=tfplan'
+                    
+                    // Pauses execution natively inside the credential context block
+                    input message: "Review the plan output above. Do you want to deploy this infrastructure to AWS?", 
+                          ok: "Deploy Now"
+                    
+                    echo "Applying Changes to AWS Cloud..."
+                    sh 'terraform apply -auto-approve tfplan'
+                }
             }
         }
     }
 
     post {
         always {
-            // Wrapped in a node block to prevent the ' h_udson.FilePath is missing' exception
-            node {
-                cleanWs()
-            }
+            // Uses the workspace block instead of 'node' to fix the label compilation error
+            cleanWs()
         }
     }
 }

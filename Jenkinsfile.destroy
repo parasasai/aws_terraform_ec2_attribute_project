@@ -2,57 +2,49 @@ pipeline {
     agent any
 
     environment {
-        // Safe mapping of your unified AWS plugin credentials
-        AWS_CREDENTIALS       = credentials('aws-credentials-id')
-        AWS_ACCESS_KEY_ID     = env.AWS_ACCESS_KEY_ID
-        AWS_SECRET_ACCESS_KEY = env.AWS_SECRET_ACCESS_KEY
-        
-        // Suppresses interactive terminal prompts during the destruction loop
-        TF_IN_AUTOMATION      = 'true'
+        // Suppresses interactive prompts since it is running via background automation
+        TF_IN_AUTOMATION = 'true'
     }
 
     stages {
         stage('Fetch Infrastructure Code') {
             steps {
-                // Pulls down your code to reference your remote S3 state configuration
                 checkout scm
             }
         }
 
-        stage('Terraform Initialization') {
+        stage('Terraform Teardown Work') {
             steps {
-                // Connects to your existing S3 backend state tracking file
-                sh 'terraform init'
-            }
-        }
-
-        stage('Destruction Preview Plan') {
-            steps {
-                // Generates a preview plan showing exactly what resources will be deleted
-                sh 'terraform plan -destroy'
-            }
-        }
-
-        stage('Safety Confirmation Gate') {
-            steps {
-                // Pauses and forces a manual confirmation step before wiping the environment
-                input message: "⚠️ WARNING: Are you completely sure you want to DESTROY all deployed AWS resources?", 
-                      ok: "Yes, Destroy Everything"
-            }
-        }
-
-        stage('Terraform Destroy Execution') {
-            steps {
-                echo "Wiping infrastructure from AWS Cloud..."
-                // Executes the destruction sequence cleanly across your AWS account
-                sh 'terraform destroy -auto-approve'
+                // Securely extracts your saved AWS credentials plugin wrapper directly into memory
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding', 
+                    credentialsId: 'aws-credentials-id', 
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID', 
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    
+                    echo "=== Starting Destruction Pipeline ==="
+                    
+                    echo "Connecting to your remote S3 backend state tracking file..."
+                    sh 'terraform init'
+                    
+                    echo "Generating destruction preview plan..."
+                    sh 'terraform plan -destroy'
+                    
+                    // Safety gate to prevent unintended deletions
+                    input message: "⚠️ WARNING: Are you completely sure you want to DESTROY all deployed AWS resources?", 
+                          ok: "Yes, Destroy Everything"
+                    
+                    echo "Wiping infrastructure from AWS Cloud..."
+                    sh 'terraform destroy -auto-approve'
+                }
             }
         }
     }
 
     post {
         always {
-            // Wipes the transient git workspace directory files from your local host machine
+            // Cleans up local workspace temporary files safely
             cleanWs()
         }
     }

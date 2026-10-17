@@ -115,10 +115,29 @@ resource "aws_instance" "app" {
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.app_sg.id]
 
+
+# User Data wraps the external file template inside an Apache deployment script
+  user_data = <<-EOF
+              #!/bin/bash
+              # Install and activate Apache
+              dnf update -y
+              dnf install -y httpd
+              systemctl start httpd
+              systemctl enable httpd
+              
+              # Write the template file contents directly to the web server path
+              cat <<'HTML' > /var/www/html/index.html
+              ${file("${path.module}/templates/school_landing.html")}
+              HTML
+              EOF
+
+
   tags = merge(local.common_tags, {
     Name = "${local.name_prefix}-ec2"
   })
 }
+
+
 
 # 9. S3 Storage Bucket
 resource "aws_s3_bucket" "storage" {
